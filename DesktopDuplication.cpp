@@ -68,32 +68,32 @@ typedef struct
 {
     UINT    WaitTime;
     UINT    WaitCount;
-}WAIT_BAND;
+} WAIT_BAND;
 
 #define WAIT_BAND_COUNT 3
 #define WAIT_BAND_STOP 0
 
 class DYNAMIC_WAIT
 {
-    public :
+    public:
         DYNAMIC_WAIT();
         ~DYNAMIC_WAIT();
 
         void Wait();
 
-    private :
+    private:
+        static const WAIT_BAND   m_WaitBands[WAIT_BAND_COUNT];
 
-    static const WAIT_BAND   m_WaitBands[WAIT_BAND_COUNT];
+        // Period in seconds that a new wait call is considered part of the same wait sequence
+        static const UINT       m_WaitSequenceTimeInSeconds = 2;
 
-    // Period in seconds that a new wait call is considered part of the same wait sequence
-    static const UINT       m_WaitSequenceTimeInSeconds = 2;
-
-    UINT                    m_CurrentWaitBandIdx;
-    UINT                    m_WaitCountInCurrentBand;
-    LARGE_INTEGER           m_QPCFrequency;
-    LARGE_INTEGER           m_LastWakeUpTime;
-    BOOL                    m_QPCValid;
+        UINT                    m_CurrentWaitBandIdx;
+        UINT                    m_WaitCountInCurrentBand;
+        LARGE_INTEGER           m_QPCFrequency;
+        LARGE_INTEGER           m_LastWakeUpTime;
+        BOOL                    m_QPCValid;
 };
+
 const WAIT_BAND DYNAMIC_WAIT::m_WaitBands[WAIT_BAND_COUNT] = {
                                                                  {250, 20},
                                                                  {2000, 60},
@@ -220,7 +220,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
 
     // Create window
-    RECT WindowRect = {0, 0, 800, 600};
+    RECT WindowRect = {0, 0, 960, 540};
     AdjustWindowRect(&WindowRect, WS_OVERLAPPEDWINDOW, FALSE);
     WindowHandle = CreateWindowW(L"ddasample", L"DXGI desktop duplication sample",
                            WS_OVERLAPPEDWINDOW,
@@ -247,10 +247,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     bool FirstTime = true;
     bool Occluded = true;
     DYNAMIC_WAIT DynamicWait;
+    DUPL_RETURN Ret;
 
     while (WM_QUIT != msg.message)
     {
-        DUPL_RETURN Ret = DUPL_RETURN_SUCCESS;
+        Ret = DUPL_RETURN_SUCCESS;
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
             if (msg.message == OCCLUSION_STATUS_MSG)
@@ -336,7 +337,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 break;
             }
         }
-    }
+    } // Main while loop
+
+    // Exiting app...
 
     // Make sure all other threads have exited
     if (SetEvent(TerminateThreadsEvent))
@@ -363,8 +366,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 //
 void ShowHelp()
 {
-    DisplayMsg(L"The following optional parameters can be used -\n  /output [all | n]\t\tto duplicate all outputs or the nth output\n  /?\t\t\tto display this help section",
-               L"Proper usage", S_OK);
+    DisplayMsg(
+        L"The following optional parameters can be used:\n"
+        L" /output[all | n]\tto duplicate all outputs or the nth output\n"
+        L" /?              \tto display this help section",
+        L"Proper usage",
+        S_OK);
 }
 
 //

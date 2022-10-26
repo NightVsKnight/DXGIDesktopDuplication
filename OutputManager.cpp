@@ -38,14 +38,6 @@ OUTPUTMANAGER::~OUTPUTMANAGER()
 }
 
 //
-// Indicates that window has been resized.
-//
-void OUTPUTMANAGER::WindowResize()
-{
-    m_NeedsResize = true;
-}
-
-//
 // Initialize all state
 //
 DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds)
@@ -216,6 +208,35 @@ DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT*
     MoveWindow(m_WindowHandle, WindowRect.left, WindowRect.top, (DeskBounds->right - DeskBounds->left) / 2, (DeskBounds->bottom - DeskBounds->top) / 2, TRUE);
 
     return Return;
+}
+
+//
+// Returns shared handle
+//
+HANDLE OUTPUTMANAGER::GetSharedHandle()
+{
+    HANDLE Hnd = nullptr;
+
+    // QI IDXGIResource interface to synchronized shared surface.
+    IDXGIResource* DXGIResource = nullptr;
+    HRESULT hr = m_SharedSurf->QueryInterface(__uuidof(IDXGIResource), reinterpret_cast<void**>(&DXGIResource));
+    if (SUCCEEDED(hr))
+    {
+        // Obtain handle to IDXGIResource object.
+        DXGIResource->GetSharedHandle(&Hnd);
+        DXGIResource->Release();
+        DXGIResource = nullptr;
+    }
+
+    return Hnd;
+}
+
+//
+// Indicates that window has been resized.
+//
+void OUTPUTMANAGER::WindowResize()
+{
+    m_NeedsResize = true;
 }
 
 //
@@ -412,27 +433,6 @@ DUPL_RETURN OUTPUTMANAGER::UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _
 }
 
 //
-// Returns shared handle
-//
-HANDLE OUTPUTMANAGER::GetSharedHandle()
-{
-    HANDLE Hnd = nullptr;
-
-    // QI IDXGIResource interface to synchronized shared surface.
-    IDXGIResource* DXGIResource = nullptr;
-    HRESULT hr = m_SharedSurf->QueryInterface(__uuidof(IDXGIResource), reinterpret_cast<void**>(&DXGIResource));
-    if (SUCCEEDED(hr))
-    {
-        // Obtain handle to IDXGIResource object.
-        DXGIResource->GetSharedHandle(&Hnd);
-        DXGIResource->Release();
-        DXGIResource = nullptr;
-    }
-
-    return Hnd;
-}
-
-//
 // Draw frame into backbuffer
 //
 DUPL_RETURN OUTPUTMANAGER::DrawFrame()
@@ -481,7 +481,7 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
     // Set resources
     UINT Stride = sizeof(VERTEX);
     UINT Offset = 0;
-    FLOAT blendFactor[4] = {0.f, 0.f, 0.f, 0.f};
+    FLOAT blendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
     m_DeviceContext->OMSetBlendState(nullptr, blendFactor, 0xffffffff);
     m_DeviceContext->OMSetRenderTargets(1, &m_RTV, nullptr);
     m_DeviceContext->VSSetShader(m_VertexShader, nullptr, 0);

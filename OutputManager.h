@@ -22,22 +22,42 @@ class OUTPUTMANAGER
     public:
         OUTPUTMANAGER();
         ~OUTPUTMANAGER();
-        DUPL_RETURN InitOutput(HWND Window, INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
-        DUPL_RETURN UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _Inout_ bool* Occluded);
+        DUPL_RETURN InitOutput(
+            HWND Window,
+            INT SingleOutput,
+            _Out_ UINT* OutCount,
+            _Out_ RECT* DeskBounds);
+        DUPL_RETURN UpdateApplicationWindow(
+            _In_ PTR_INFO* PointerInfo,
+            _Inout_ bool* Occluded);
         void CleanRefs();
         HANDLE GetSharedHandle();
         void WindowResize();
 
     private:
     // Methods
-        DUPL_RETURN ProcessMonoMask(bool IsMono, _Inout_ PTR_INFO* PtrInfo, _Out_ INT* PtrWidth, _Out_ INT* PtrHeight, _Out_ INT* PtrLeft, _Out_ INT* PtrTop, _Outptr_result_bytebuffer_(*PtrHeight * *PtrWidth * BPP) BYTE** InitBuffer, _Out_ D3D11_BOX* Box);
+        DUPL_RETURN ProcessMonoMask(
+            bool IsMono,
+            _Inout_ PTR_INFO* PtrInfo,
+            _Out_ INT* PtrWidth,
+            _Out_ INT* PtrHeight,
+            _Out_ INT* PtrLeft,
+            _Out_ INT* PtrTop,
+            _Outptr_result_bytebuffer_(*PtrHeight** PtrWidth* BPP) BYTE** InitBuffer,
+            _Out_ D3D11_BOX* Box);
         DUPL_RETURN MakeRTV();
-        void SetViewPort(UINT Width, UINT Height);
+        void SetViewPort(
+            UINT Width,
+            UINT Height);
         DUPL_RETURN InitShaders();
         DUPL_RETURN InitGeometry();
-        DUPL_RETURN CreateSharedSurf(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
+        DUPL_RETURN CreateSharedSurf(
+            INT SingleOutput,
+            _Out_ UINT* OutCount,
+            _Out_ RECT* DeskBounds);
         DUPL_RETURN DrawFrame();
-        DUPL_RETURN DrawMouse(_In_ PTR_INFO* PtrInfo);
+        DUPL_RETURN DrawMouse(
+            _In_ PTR_INFO* PtrInfo);
         DUPL_RETURN ResizeSwapChain();
 
     // Vars

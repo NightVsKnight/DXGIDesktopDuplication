@@ -61,7 +61,12 @@ void DISPLAYMANAGER::InitD3D(DX_RESOURCES* Data)
 //
 // Process a given frame and its metadata
 //
-DUPL_RETURN DISPLAYMANAGER::ProcessFrame(_In_ FRAME_DATA* Data, _Inout_ ID3D11Texture2D* SharedSurf, INT OffsetX, INT OffsetY, _In_ DXGI_OUTPUT_DESC* DeskDesc)
+DUPL_RETURN DISPLAYMANAGER::ProcessFrame(
+    _In_ FRAME_DATA* Data,
+    _Inout_ ID3D11Texture2D* SharedSurf,
+    INT OffsetX,
+    INT OffsetY,
+    _In_ DXGI_OUTPUT_DESC* DeskDesc)
 {
     DUPL_RETURN Ret = DUPL_RETURN_SUCCESS;
 
@@ -100,7 +105,13 @@ ID3D11Device* DISPLAYMANAGER::GetDevice()
 //
 // Set appropriate source and destination rects for move rects
 //
-void DISPLAYMANAGER::SetMoveRect(_Out_ RECT* SrcRect, _Out_ RECT* DestRect, _In_ DXGI_OUTPUT_DESC* DeskDesc, _In_ DXGI_OUTDUPL_MOVE_RECT* MoveRect, INT TexWidth, INT TexHeight)
+void DISPLAYMANAGER::SetMoveRect(
+    _Out_ RECT* SrcRect,
+    _Out_ RECT* DestRect,
+    _In_ DXGI_OUTPUT_DESC* DeskDesc,
+    _In_ DXGI_OUTDUPL_MOVE_RECT* MoveRect,
+    INT TexWidth,
+    INT TexHeight)
 {
     switch (DeskDesc->Rotation)
     {
@@ -166,7 +177,15 @@ void DISPLAYMANAGER::SetMoveRect(_Out_ RECT* SrcRect, _Out_ RECT* DestRect, _In_
 //
 // Copy move rectangles
 //
-DUPL_RETURN DISPLAYMANAGER::CopyMove(_Inout_ ID3D11Texture2D* SharedSurf, _In_reads_(MoveCount) DXGI_OUTDUPL_MOVE_RECT* MoveBuffer, UINT MoveCount, INT OffsetX, INT OffsetY, _In_ DXGI_OUTPUT_DESC* DeskDesc, INT TexWidth, INT TexHeight)
+DUPL_RETURN DISPLAYMANAGER::CopyMove(
+    _Inout_ ID3D11Texture2D* SharedSurf,
+    _In_reads_(MoveCount) DXGI_OUTDUPL_MOVE_RECT* MoveBuffer,
+    UINT MoveCount,
+    INT OffsetX,
+    INT OffsetY,
+    _In_ DXGI_OUTPUT_DESC* DeskDesc,
+    INT TexWidth,
+    INT TexHeight)
 {
     D3D11_TEXTURE2D_DESC FullDesc;
     SharedSurf->GetDesc(&FullDesc);
@@ -223,7 +242,14 @@ DUPL_RETURN DISPLAYMANAGER::CopyMove(_Inout_ ID3D11Texture2D* SharedSurf, _In_re
 #pragma warning(push)
 #pragma warning(disable:__WARNING_USING_UNINIT_VAR) // false positives in SetDirtyVert due to tool bug
 
-void DISPLAYMANAGER::SetDirtyVert(_Out_writes_(NUMVERTICES) VERTEX* Vertices, _In_ RECT* Dirty, INT OffsetX, INT OffsetY, _In_ DXGI_OUTPUT_DESC* DeskDesc, _In_ D3D11_TEXTURE2D_DESC* FullDesc, _In_ D3D11_TEXTURE2D_DESC* ThisDesc)
+void DISPLAYMANAGER::SetDirtyVert(
+    _Out_writes_(NUMVERTICES) VERTEX* Vertices,
+    _In_ RECT* Dirty,
+    INT OffsetX,
+    INT OffsetY,
+    _In_ DXGI_OUTPUT_DESC* DeskDesc,
+    _In_ D3D11_TEXTURE2D_DESC* FullDesc,
+    _In_ D3D11_TEXTURE2D_DESC* ThisDesc)
 {
     INT CenterX = FullDesc->Width / 2;
     INT CenterY = FullDesc->Height / 2;
@@ -314,7 +340,14 @@ void DISPLAYMANAGER::SetDirtyVert(_Out_writes_(NUMVERTICES) VERTEX* Vertices, _I
 //
 // Copies dirty rectangles
 //
-DUPL_RETURN DISPLAYMANAGER::CopyDirty(_In_ ID3D11Texture2D* SrcSurface, _Inout_ ID3D11Texture2D* SharedSurf, _In_reads_(DirtyCount) RECT* DirtyBuffer, UINT DirtyCount, INT OffsetX, INT OffsetY, _In_ DXGI_OUTPUT_DESC* DeskDesc)
+DUPL_RETURN DISPLAYMANAGER::CopyDirty(
+    _In_ ID3D11Texture2D* SrcSurface,
+    _Inout_ ID3D11Texture2D* SharedSurf,
+    _In_reads_(DirtyCount) RECT* DirtyBuffer,
+    UINT DirtyCount,
+    INT OffsetX,
+    INT OffsetY,
+    _In_ DXGI_OUTPUT_DESC* DeskDesc)
 {
     HRESULT hr;
 
