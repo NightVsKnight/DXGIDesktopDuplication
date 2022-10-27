@@ -35,7 +35,7 @@ class OUTPUTMANAGER
         void WindowResize();
 
     private:
-    // Methods
+        // Methods
         DUPL_RETURN ProcessMonoMask(
             bool IsMono,
             _Inout_ PTR_INFO* PtrInfo,
@@ -60,7 +60,7 @@ class OUTPUTMANAGER
             _In_ PTR_INFO* PtrInfo);
         DUPL_RETURN ResizeSwapChain();
 
-    // Vars
+        // Vars
         IDXGISwapChain1* m_SwapChain;
         ID3D11Device* m_Device;
         IDXGIFactory2* m_Factory;

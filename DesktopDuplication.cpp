@@ -477,6 +477,8 @@ DWORD WINAPI DDProc(_In_ void* Param)
     // New display manager
     DispMgr.InitD3D(&TData->DxRes);
 
+    DispMgr.NdiInit(); // TODO: handle error
+
     // Obtain handle to sync shared Surface
     HRESULT hr = TData->DxRes.Device->OpenSharedResource(TData->TexSharedHandle, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&SharedSurf));
     if (FAILED (hr))

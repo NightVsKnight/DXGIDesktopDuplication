@@ -11,21 +11,22 @@ using namespace DirectX;
 //
 // Constructor NULLs out all pointers & sets appropriate var vals
 //
-OUTPUTMANAGER::OUTPUTMANAGER() : m_SwapChain(nullptr),
-                                 m_Device(nullptr),
-                                 m_Factory(nullptr),
-                                 m_DeviceContext(nullptr),
-                                 m_RTV(nullptr),
-                                 m_SamplerLinear(nullptr),
-                                 m_BlendState(nullptr),
-                                 m_VertexShader(nullptr),
-                                 m_PixelShader(nullptr),
-                                 m_InputLayout(nullptr),
-                                 m_SharedSurf(nullptr),
-                                 m_KeyMutex(nullptr),
-                                 m_WindowHandle(nullptr),
-                                 m_NeedsResize(false),
-                                 m_OcclusionCookie(0)
+OUTPUTMANAGER::OUTPUTMANAGER()
+    : m_SwapChain(nullptr)
+    , m_Device(nullptr)
+    , m_Factory(nullptr)
+    , m_DeviceContext(nullptr)
+    , m_RTV(nullptr)
+    , m_SamplerLinear(nullptr)
+    , m_BlendState(nullptr)
+    , m_VertexShader(nullptr)
+    , m_PixelShader(nullptr)
+    , m_InputLayout(nullptr)
+    , m_SharedSurf(nullptr)
+    , m_KeyMutex(nullptr)
+    , m_WindowHandle(nullptr)
+    , m_NeedsResize(false)
+    , m_OcclusionCookie(0)
 {
 }
 
@@ -528,7 +529,15 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
 //
 // Process both masked and monochrome pointers
 //
-DUPL_RETURN OUTPUTMANAGER::ProcessMonoMask(bool IsMono, _Inout_ PTR_INFO* PtrInfo, _Out_ INT* PtrWidth, _Out_ INT* PtrHeight, _Out_ INT* PtrLeft, _Out_ INT* PtrTop, _Outptr_result_bytebuffer_(*PtrHeight * *PtrWidth * BPP) BYTE** InitBuffer, _Out_ D3D11_BOX* Box)
+DUPL_RETURN OUTPUTMANAGER::ProcessMonoMask(
+    bool IsMono,
+    _Inout_ PTR_INFO* PtrInfo,
+    _Out_ INT* PtrWidth,
+    _Out_ INT* PtrHeight,
+    _Out_ INT* PtrLeft,
+    _Out_ INT* PtrTop,
+    _Outptr_result_bytebuffer_(*PtrHeight * *PtrWidth * BPP) BYTE** InitBuffer,
+    _Out_ D3D11_BOX* Box)
 {
     // Desktop dimensions
     D3D11_TEXTURE2D_DESC FullDesc;

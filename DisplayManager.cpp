@@ -8,19 +8,35 @@
 #include "DisplayManager.h"
 using namespace DirectX;
 
+#include <stdexcept>
+#include <sstream>
+#ifdef _WIN64
+#pragma comment(lib, "Processing.NDI.Lib.x64.lib")
+#endif // _WIN64
+
+
 //
 // Constructor NULLs out vars
 //
-DISPLAYMANAGER::DISPLAYMANAGER() : m_Device(nullptr),
-                                   m_DeviceContext(nullptr),
-                                   m_MoveSurf(nullptr),
-                                   m_VertexShader(nullptr),
-                                   m_PixelShader(nullptr),
-                                   m_InputLayout(nullptr),
-                                   m_RTV(nullptr),
-                                   m_SamplerLinear(nullptr),
-                                   m_DirtyVertexBufferAlloc(nullptr),
-                                   m_DirtyVertexBufferAllocSize(0)
+DISPLAYMANAGER::DISPLAYMANAGER()
+    : m_Device(nullptr)
+    , m_DeviceContext(nullptr)
+    , m_MoveSurf(nullptr)
+    , m_VertexShader(nullptr)
+    , m_PixelShader(nullptr)
+    , m_InputLayout(nullptr)
+    , m_RTV(nullptr)
+    , m_SamplerLinear(nullptr)
+    , m_DirtyVertexBufferAlloc(nullptr)
+    , m_DirtyVertexBufferAllocSize(0)
+
+    , m_frameSize{ 0,  0 }
+    , m_frameTexture{ nullptr }
+
+    , m_pNdiSend(nullptr)
+    , m_frameCount{ 0 }
+    , m_frameSizeBytes{ 0 }
+    , m_pNdiSendBuffers{ {} }
 {
 }
 
@@ -36,6 +52,8 @@ DISPLAYMANAGER::~DISPLAYMANAGER()
         delete [] m_DirtyVertexBufferAlloc;
         m_DirtyVertexBufferAlloc = nullptr;
     }
+
+    NdiDestroy();
 }
 
 //
@@ -58,6 +76,189 @@ void DISPLAYMANAGER::InitD3D(DX_RESOURCES* Data)
     m_SamplerLinear->AddRef();
 }
 
+DXGI_FORMAT ndiPixelFormatToDxPixelFormat(NDIlib_FourCC_video_type_e pixelFormatNdi)
+{
+    switch (pixelFormatNdi)
+    {
+    case NDIlib_FourCC_video_type_e::NDIlib_FourCC_type_BGRA:
+        return DXGI_FORMAT_B8G8R8A8_UNORM;// DirectXPixelFormat::B8G8R8A8UIntNormalized;
+        // TODO: Add more formats as necessary
+    default:
+        throw std::runtime_error((std::ostringstream("Unhandled pixel format ") << pixelFormatNdi).str());
+    }
+}
+
+NDIlib_FourCC_video_type_e dxPixelFormatToNdiPixelFormat(DXGI_FORMAT pixelFormatDx)
+{
+    switch (pixelFormatDx)
+    {
+    case DXGI_FORMAT_B8G8R8A8_UNORM://DirectXPixelFormat::B8G8R8A8UIntNormalized:
+        return NDIlib_FourCC_video_type_e::NDIlib_FourCC_video_type_BGRA;
+        // TODO: Add more formats as necessary
+    default:
+        throw std::runtime_error((std::ostringstream("Unhandled pixel format ") << pixelFormatDx).str());
+    }
+}
+
+int getPixelSizeBytes(DXGI_FORMAT pixelFormatDx)
+{
+    switch (pixelFormatDx)
+    {
+    case DXGI_FORMAT_B8G8R8A8_UNORM://DirectXPixelFormat::B8G8R8A8UIntNormalized:
+        return 4;
+        // TODO: Add more formats as necessary
+    default:
+        throw std::runtime_error((std::ostringstream("Unhandled pixel format ") << pixelFormatDx).str());
+    }
+}
+
+bool DISPLAYMANAGER::NdiInit()
+{
+    if (!NDIlib_initialize())
+    {
+        return false;
+    }
+
+    m_pixelFormatDx = PIXEL_FORMAT_DX;
+    m_pixelFormatNdi = dxPixelFormatToNdiPixelFormat(m_pixelFormatDx);
+    m_pixelSizeBytes = getPixelSizeBytes(m_pixelFormatDx);
+
+    m_senderName = "DesktopDuplicationAPI";
+    m_connectionMetadata = "";
+    m_receiverCount = 0;
+
+    NDIlib_send_create_t NDI_send_create_desc;
+    NDI_send_create_desc.p_ndi_name = m_senderName.c_str();
+    m_pNdiSend = NDIlib_send_create(&NDI_send_create_desc);
+    assert(m_pNdiSend != nullptr);
+
+    return true;
+}
+
+void DISPLAYMANAGER::NdiDestroy()
+{
+    if (m_frameTexture)
+    {
+        m_frameTexture->Release();
+        m_frameTexture = nullptr;
+    }
+    m_frameSize = { 0, 0 };
+    m_pixelSizeBytes = 0;
+    m_pixelFormatDx = DXGI_FORMAT_UNKNOWN;
+
+    if (m_pNdiSend)
+    {
+        NDIlib_send_send_video_async_v2(m_pNdiSend, NULL);
+        NDIlib_send_destroy(m_pNdiSend);
+        m_pNdiSend = nullptr;
+    }
+    for (int i = 0; i < NUM_CAPTURE_FRAME_BUFFERS; ++i)
+    {
+        if (m_pNdiSendBuffers[i])
+        {
+            delete[] m_pNdiSendBuffers[i];
+            m_pNdiSendBuffers[i] = nullptr;
+        }
+    }
+    m_receiverCount = 0;
+    m_connectionMetadata = "";
+    m_senderName = "";
+
+    m_frameCount = 0;
+    m_frameSizeBytes = 0;
+
+    NDIlib_destroy();
+}
+
+bool DISPLAYMANAGER::onFrameReceived(
+    ID3D11Texture2D* frame)
+{
+    if (!m_pNdiSend) return false;
+
+    auto receiverCount = NDIlib_send_get_no_connections(m_pNdiSend, 0);
+    //qDebug() << "receiverCount" << receiverCount;
+    if (receiverCount != m_receiverCount)
+    {
+        //emit onReceiverCountChanged(receiverCount);
+        m_receiverCount = receiverCount;
+    }
+    if (receiverCount == 0)
+    {
+        return false;
+    }
+
+    if (frame)
+    {
+        //qDebug() << ".";
+#if 0
+        //
+        // METADATA RECV
+        //
+        NDIlib_metadata_frame_t metadata_frame;
+        switch (NDIlib_send_capture(m_pNdiSend, &metadata_frame, 0))
+        {
+        case NDIlib_frame_type_e::NDIlib_frame_type_metadata:
+        {
+            auto metadata = QString::fromUtf8(metadata_frame.p_data);
+            m_pNdi->send_free_metadata(pNdiSend, &metadata_frame);
+            qDebug() << "pNdi->send_capture NDIlib_frame_type_metadata" << metadata;
+            emit onMetadataReceived(metadata);
+            break;
+        }
+        case NDIlib_frame_type_e::NDIlib_frame_type_status_change:
+            qDebug() << "pNdi->send_capture NDIlib_frame_type_status_change";
+            break;
+        default:
+            // ignore
+            break;
+        }
+#endif
+    }
+    else
+    {
+        // End of capture
+        NDIlib_send_send_video_async_v2(m_pNdiSend, NULL);
+    }
+
+    return true;
+}
+
+void DISPLAYMANAGER::onFrameReceivedBuffer(
+    int frameWidth,
+    int frameHeight,
+    int frameStrideBytes,
+    void* pFrameBuffer)
+{
+    if (!m_pNdiSend || !pFrameBuffer) return;
+
+    auto thisFrameSizeBytes = frameStrideBytes * frameHeight;
+    if (m_frameSizeBytes < thisFrameSizeBytes)
+    {
+        //qDebug() << "growing m_pNdiSendBuffers from" << m_frameSizeBytes << "to" << thisFrameSizeBytes << "bytes";
+        m_frameSizeBytes = thisFrameSizeBytes;
+        for (int i = 0; i < NUM_CAPTURE_FRAME_BUFFERS; ++i)
+        {
+            if (m_pNdiSendBuffers[i])
+            {
+                delete[] m_pNdiSendBuffers[i];
+            }
+            m_pNdiSendBuffers[i] = new uint8_t[thisFrameSizeBytes];
+        }
+    }
+
+    uint8_t* pOutBuffer = m_pNdiSendBuffers[m_frameCount++ % NUM_CAPTURE_FRAME_BUFFERS];
+    memcpy(pOutBuffer, pFrameBuffer, thisFrameSizeBytes);
+
+    NDIlib_video_frame_v2_t video_frame;
+    video_frame.xres = frameWidth;
+    video_frame.yres = frameHeight;
+    video_frame.FourCC = m_pixelFormatNdi;
+    video_frame.line_stride_in_bytes = frameStrideBytes;
+    video_frame.p_data = pOutBuffer;
+
+    NDIlib_send_send_video_async_v2(m_pNdiSend, &video_frame);
+}
+
 //
 // Process a given frame and its metadata
 //
@@ -73,12 +274,12 @@ DUPL_RETURN DISPLAYMANAGER::ProcessFrame(
     // Process dirties and moves
     if (Data->FrameInfo.TotalMetadataBufferSize)
     {
-        D3D11_TEXTURE2D_DESC Desc;
-        Data->Frame->GetDesc(&Desc);
+        D3D11_TEXTURE2D_DESC FrameDesc;
+        Data->Frame->GetDesc(&FrameDesc);
 
         if (Data->MoveCount)
         {
-            Ret = CopyMove(SharedSurf, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(Data->MetaData), Data->MoveCount, OffsetX, OffsetY, DeskDesc, Desc.Width, Desc.Height);
+            Ret = CopyMove(SharedSurf, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(Data->MetaData), Data->MoveCount, OffsetX, OffsetY, DeskDesc, FrameDesc.Width, FrameDesc.Height);
             if (Ret != DUPL_RETURN_SUCCESS)
             {
                 return Ret;
@@ -88,7 +289,80 @@ DUPL_RETURN DISPLAYMANAGER::ProcessFrame(
         if (Data->DirtyCount)
         {
             Ret = CopyDirty(Data->Frame, SharedSurf, reinterpret_cast<RECT*>(Data->MetaData + (Data->MoveCount * sizeof(DXGI_OUTDUPL_MOVE_RECT))), Data->DirtyCount, OffsetX, OffsetY, DeskDesc);
+            if (Ret != DUPL_RETURN_SUCCESS)
+            {
+                return Ret;
+            }
         }
+
+#if 1
+        if (onFrameReceived(SharedSurf))
+        {
+            // Send Data->Frame, that has been combined into SharedSurf, to NDI...
+
+            auto frame = Data->Frame;
+
+            auto frameSurface = SharedSurf;
+
+            bool resized = false;
+
+            HRESULT hr = S_OK;
+
+            if (!m_frameTexture)
+            {
+                // First time; create the texture
+                m_frameSize.cx = FrameDesc.Width;
+                m_frameSize.cy = FrameDesc.Height;
+                D3D11_TEXTURE2D_DESC frameSurfaceDesc;
+                frameSurface->GetDesc(&frameSurfaceDesc);
+                frameSurfaceDesc.Usage = D3D11_USAGE_STAGING;//D3D11_USAGE_DEFAULT;//D3D11_USAGE_IMMUTABLE;//D3D11_USAGE_DYNAMIC;
+                frameSurfaceDesc.BindFlags = 0;// D3D11_BIND_SHADER_RESOURCE;
+                frameSurfaceDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                frameSurfaceDesc.MiscFlags = 0;
+                frameSurfaceDesc.MipLevels = 1;
+                frameSurfaceDesc.ArraySize = 1;
+                frameSurfaceDesc.SampleDesc = { 1, 0 };
+                hr = m_Device->CreateTexture2D(&frameSurfaceDesc, nullptr, &m_frameTexture);
+            }
+            else
+            {
+                // Not first time; re-create the texture if dimensions changed since last time
+                if (m_frameSize.cx != FrameDesc.Width || m_frameSize.cy != FrameDesc.Height)
+                {
+                    resized = true;
+                    m_frameSize.cx = FrameDesc.Width;
+                    m_frameSize.cy = FrameDesc.Height;
+                m_frameTexture->Release();
+                    D3D11_TEXTURE2D_DESC frameSurfaceDesc;
+                    frameSurface->GetDesc(&frameSurfaceDesc);
+                    frameSurfaceDesc.Width = FrameDesc.Width;
+                    frameSurfaceDesc.Height = FrameDesc.Height;
+                    hr = m_Device->CreateTexture2D(&frameSurfaceDesc, nullptr, &m_frameTexture);
+                }
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                m_DeviceContext->CopyResource(m_frameTexture, frameSurface);
+
+                D3D11_MAPPED_SUBRESOURCE mappedResource;
+                hr = m_DeviceContext->Map(m_frameTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+                if (SUCCEEDED(hr))
+                {
+                    onFrameReceivedBuffer(FrameDesc.Width, FrameDesc.Height, mappedResource.RowPitch, mappedResource.pData);
+                    m_DeviceContext->Unmap(m_frameTexture, 0);
+                }
+            }
+
+            if (resized)
+            {
+                //m_captureFramePool.Recreate(m_d3dDevice,
+                //    m_pixelFormat,
+                //    m_frameBufferCount,
+                //    m_frameSize);
+            }
+        }
+#endif
     }
 
     return Ret;

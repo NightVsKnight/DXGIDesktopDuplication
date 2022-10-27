@@ -8,6 +8,13 @@
 #ifndef _DISPLAYMANAGER_H_
 #define _DISPLAYMANAGER_H_
 
+#include "Processing.NDI.Lib.h"
+// Per https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api#updating-the-desktop-image-data
+// "The format of the desktop image is always DXGI_FORMAT_B8G8R8A8_UNORM no matter what the current display mode is."
+#define PIXEL_FORMAT_DX DXGI_FORMAT_B8G8R8A8_UNORM
+#define NUM_CAPTURE_FRAME_BUFFERS 2
+#include <string>
+
 #include "CommonTypes.h"
 
 //
@@ -20,7 +27,8 @@ class DISPLAYMANAGER
         ~DISPLAYMANAGER();
         void InitD3D(
             DX_RESOURCES* Data);
-        bool InitNDI();
+        bool NdiInit();
+        void NdiDestroy();
         ID3D11Device* GetDevice();
         DUPL_RETURN ProcessFrame(
             _In_ FRAME_DATA* Data,
@@ -76,6 +84,34 @@ class DISPLAYMANAGER
         ID3D11SamplerState* m_SamplerLinear;
         BYTE* m_DirtyVertexBufferAlloc;
         UINT m_DirtyVertexBufferAllocSize;
+
+        //
+        // Support for NDI Send...
+        //
+
+        bool DISPLAYMANAGER::onFrameReceived(
+            ID3D11Texture2D* frame);
+        void DISPLAYMANAGER::onFrameReceivedBuffer(
+            int frameWidth,
+            int frameHeight,
+            int frameStrideBytes,
+            void* pFrameBuffer);
+
+        DXGI_FORMAT                m_pixelFormatDx;
+        NDIlib_FourCC_video_type_e m_pixelFormatNdi;
+        int                        m_pixelSizeBytes;
+
+        std::string m_senderName;
+        std::string m_connectionMetadata;
+        int         m_receiverCount;
+
+        SIZE m_frameSize;
+        ID3D11Texture2D* m_frameTexture;
+
+        NDIlib_send_instance_t m_pNdiSend;
+        uint64_t m_frameCount;
+        size_t m_frameSizeBytes;
+        uint8_t* m_pNdiSendBuffers[NUM_CAPTURE_FRAME_BUFFERS];
 };
 
 #endif
