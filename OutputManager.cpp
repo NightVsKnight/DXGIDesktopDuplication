@@ -16,7 +16,7 @@ OUTPUTMANAGER::OUTPUTMANAGER()
     , m_Device(nullptr)
     , m_Factory(nullptr)
     , m_DeviceContext(nullptr)
-    , m_RTV(nullptr)
+    , m_RenderTargetView(nullptr)
     , m_SamplerLinear(nullptr)
     , m_BlendState(nullptr)
     , m_VertexShader(nullptr)
@@ -155,7 +155,7 @@ DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT*
     }
 
     // Make new render target view
-    Return = MakeRTV();
+    Return = CreateRenderTargetView();
     if (Return != DUPL_RETURN_SUCCESS)
     {
         return Return;
@@ -434,6 +434,44 @@ DUPL_RETURN OUTPUTMANAGER::UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _
 }
 
 //
+// Resize swapchain
+//
+DUPL_RETURN OUTPUTMANAGER::ResizeSwapChain()
+{
+    if (m_RenderTargetView)
+    {
+        m_RenderTargetView->Release();
+        m_RenderTargetView = nullptr;
+    }
+
+    RECT WindowRect;
+    GetClientRect(m_WindowHandle, &WindowRect);
+    UINT Width = WindowRect.right - WindowRect.left;
+    UINT Height = WindowRect.bottom - WindowRect.top;
+
+    // Resize swapchain
+    DXGI_SWAP_CHAIN_DESC SwapChainDesc;
+    m_SwapChain->GetDesc(&SwapChainDesc);
+    HRESULT hr = m_SwapChain->ResizeBuffers(SwapChainDesc.BufferCount, Width, Height, SwapChainDesc.BufferDesc.Format, SwapChainDesc.Flags);
+    if (FAILED(hr))
+    {
+        return ProcessFailure(m_Device, L"Failed to resize swapchain buffers in OUTPUTMANAGER", L"Error", hr, SystemTransitionsExpectedErrors);
+    }
+
+    // Make new render target view
+    DUPL_RETURN Ret = CreateRenderTargetView();
+    if (Ret != DUPL_RETURN_SUCCESS)
+    {
+        return Ret;
+    }
+
+    // Set new viewport
+    SetViewPort(Width, Height);
+
+    return Ret;
+}
+
+//
 // Draw frame into backbuffer
 //
 DUPL_RETURN OUTPUTMANAGER::DrawFrame()
@@ -484,7 +522,7 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
     UINT Offset = 0;
     FLOAT blendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
     m_DeviceContext->OMSetBlendState(nullptr, blendFactor, 0xffffffff);
-    m_DeviceContext->OMSetRenderTargets(1, &m_RTV, nullptr);
+    m_DeviceContext->OMSetRenderTargets(1, &m_RenderTargetView, nullptr);
     m_DeviceContext->VSSetShader(m_VertexShader, nullptr, 0);
     m_DeviceContext->PSSetShader(m_PixelShader, nullptr, 0);
     m_DeviceContext->PSSetShaderResources(0, 1, &ShaderResource);
@@ -522,6 +560,198 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
     // Release shader resource
     ShaderResource->Release();
     ShaderResource = nullptr;
+
+    return DUPL_RETURN_SUCCESS;
+}
+
+//
+// Draw mouse provided in buffer to backbuffer
+//
+DUPL_RETURN OUTPUTMANAGER::DrawMouse(_In_ PTR_INFO* PtrInfo)
+{
+    // Vars to be used
+    ID3D11Texture2D* MouseTex = nullptr;
+    ID3D11ShaderResourceView* ShaderRes = nullptr;
+    ID3D11Buffer* VertexBufferMouse = nullptr;
+    D3D11_SUBRESOURCE_DATA InitData;
+    D3D11_TEXTURE2D_DESC Desc;
+    D3D11_SHADER_RESOURCE_VIEW_DESC SDesc;
+
+    // Position will be changed based on mouse position
+    VERTEX Vertices[NUMVERTICES] =
+    {
+        {XMFLOAT3(-1.0f, -1.0f, 0), XMFLOAT2(0.0f, 1.0f)},
+        {XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f)},
+        {XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f)},
+        {XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f)},
+        {XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f)},
+        {XMFLOAT3(1.0f, 1.0f, 0), XMFLOAT2(1.0f, 0.0f)},
+    };
+
+    D3D11_TEXTURE2D_DESC FullDesc;
+    m_SharedSurf->GetDesc(&FullDesc);
+    INT DesktopWidth = FullDesc.Width;
+    INT DesktopHeight = FullDesc.Height;
+
+    // Center of desktop dimensions
+    INT CenterX = (DesktopWidth / 2);
+    INT CenterY = (DesktopHeight / 2);
+
+    // Clipping adjusted coordinates / dimensions
+    INT PtrWidth = 0;
+    INT PtrHeight = 0;
+    INT PtrLeft = 0;
+    INT PtrTop = 0;
+
+    // Buffer used if necessary (in case of monochrome or masked pointer)
+    BYTE* InitBuffer = nullptr;
+
+    // Used for copying pixels
+    D3D11_BOX Box;
+    Box.front = 0;
+    Box.back = 1;
+
+    Desc.MipLevels = 1;
+    Desc.ArraySize = 1;
+    Desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    Desc.SampleDesc.Count = 1;
+    Desc.SampleDesc.Quality = 0;
+    Desc.Usage = D3D11_USAGE_DEFAULT;
+    Desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    Desc.CPUAccessFlags = 0;
+    Desc.MiscFlags = 0;
+
+    // Set shader resource properties
+    SDesc.Format = Desc.Format;
+    SDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    SDesc.Texture2D.MostDetailedMip = Desc.MipLevels - 1;
+    SDesc.Texture2D.MipLevels = Desc.MipLevels;
+
+    switch (PtrInfo->ShapeInfo.Type)
+    {
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR:
+    {
+        PtrLeft = PtrInfo->Position.x;
+        PtrTop = PtrInfo->Position.y;
+
+        PtrWidth = static_cast<INT>(PtrInfo->ShapeInfo.Width);
+        PtrHeight = static_cast<INT>(PtrInfo->ShapeInfo.Height);
+
+        break;
+    }
+
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME:
+    {
+        ProcessMonoMask(true, PtrInfo, &PtrWidth, &PtrHeight, &PtrLeft, &PtrTop, &InitBuffer, &Box);
+        break;
+    }
+
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR:
+    {
+        ProcessMonoMask(false, PtrInfo, &PtrWidth, &PtrHeight, &PtrLeft, &PtrTop, &InitBuffer, &Box);
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    // VERTEX creation
+    Vertices[0].Pos.x = (PtrLeft - CenterX) / (FLOAT)CenterX;
+    Vertices[0].Pos.y = -1 * ((PtrTop + PtrHeight) - CenterY) / (FLOAT)CenterY;
+    Vertices[1].Pos.x = (PtrLeft - CenterX) / (FLOAT)CenterX;
+    Vertices[1].Pos.y = -1 * (PtrTop - CenterY) / (FLOAT)CenterY;
+    Vertices[2].Pos.x = ((PtrLeft + PtrWidth) - CenterX) / (FLOAT)CenterX;
+    Vertices[2].Pos.y = -1 * ((PtrTop + PtrHeight) - CenterY) / (FLOAT)CenterY;
+    Vertices[3].Pos.x = Vertices[2].Pos.x;
+    Vertices[3].Pos.y = Vertices[2].Pos.y;
+    Vertices[4].Pos.x = Vertices[1].Pos.x;
+    Vertices[4].Pos.y = Vertices[1].Pos.y;
+    Vertices[5].Pos.x = ((PtrLeft + PtrWidth) - CenterX) / (FLOAT)CenterX;
+    Vertices[5].Pos.y = -1 * (PtrTop - CenterY) / (FLOAT)CenterY;
+
+    // Set texture properties
+    Desc.Width = PtrWidth;
+    Desc.Height = PtrHeight;
+
+    // Set up init data
+    InitData.pSysMem = (PtrInfo->ShapeInfo.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR) ? PtrInfo->PtrShapeBuffer : InitBuffer;
+    InitData.SysMemPitch = (PtrInfo->ShapeInfo.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR) ? PtrInfo->ShapeInfo.Pitch : PtrWidth * BPP;
+    InitData.SysMemSlicePitch = 0;
+
+    // Create mouseshape as texture
+    HRESULT hr = m_Device->CreateTexture2D(&Desc, &InitData, &MouseTex);
+    if (FAILED(hr))
+    {
+        return ProcessFailure(m_Device, L"Failed to create mouse pointer texture", L"Error", hr, SystemTransitionsExpectedErrors);
+    }
+
+    // Create shader resource from texture
+    hr = m_Device->CreateShaderResourceView(MouseTex, &SDesc, &ShaderRes);
+    if (FAILED(hr))
+    {
+        MouseTex->Release();
+        MouseTex = nullptr;
+        return ProcessFailure(m_Device, L"Failed to create shader resource from mouse pointer texture", L"Error", hr, SystemTransitionsExpectedErrors);
+    }
+
+    D3D11_BUFFER_DESC BDesc;
+    ZeroMemory(&BDesc, sizeof(D3D11_BUFFER_DESC));
+    BDesc.Usage = D3D11_USAGE_DEFAULT;
+    BDesc.ByteWidth = sizeof(VERTEX) * NUMVERTICES;
+    BDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    BDesc.CPUAccessFlags = 0;
+
+    ZeroMemory(&InitData, sizeof(D3D11_SUBRESOURCE_DATA));
+    InitData.pSysMem = Vertices;
+
+    // Create vertex buffer
+    hr = m_Device->CreateBuffer(&BDesc, &InitData, &VertexBufferMouse);
+    if (FAILED(hr))
+    {
+        ShaderRes->Release();
+        ShaderRes = nullptr;
+        MouseTex->Release();
+        MouseTex = nullptr;
+        return ProcessFailure(m_Device, L"Failed to create mouse pointer vertex buffer in OutputManager", L"Error", hr, SystemTransitionsExpectedErrors);
+    }
+
+    // Set resources
+    FLOAT BlendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
+    UINT Stride = sizeof(VERTEX);
+    UINT Offset = 0;
+    m_DeviceContext->IASetVertexBuffers(0, 1, &VertexBufferMouse, &Stride, &Offset);
+    m_DeviceContext->OMSetBlendState(m_BlendState, BlendFactor, 0xFFFFFFFF);
+    m_DeviceContext->OMSetRenderTargets(1, &m_RenderTargetView, nullptr);
+    m_DeviceContext->VSSetShader(m_VertexShader, nullptr, 0);
+    m_DeviceContext->PSSetShader(m_PixelShader, nullptr, 0);
+    m_DeviceContext->PSSetShaderResources(0, 1, &ShaderRes);
+    m_DeviceContext->PSSetSamplers(0, 1, &m_SamplerLinear);
+
+    // Draw
+    m_DeviceContext->Draw(NUMVERTICES, 0);
+
+    // Clean
+    if (VertexBufferMouse)
+    {
+        VertexBufferMouse->Release();
+        VertexBufferMouse = nullptr;
+    }
+    if (ShaderRes)
+    {
+        ShaderRes->Release();
+        ShaderRes = nullptr;
+    }
+    if (MouseTex)
+    {
+        MouseTex->Release();
+        MouseTex = nullptr;
+    }
+    if (InitBuffer)
+    {
+        delete[] InitBuffer;
+        InitBuffer = nullptr;
+    }
 
     return DUPL_RETURN_SUCCESS;
 }
@@ -720,198 +950,6 @@ DUPL_RETURN OUTPUTMANAGER::ProcessMonoMask(
 }
 
 //
-// Draw mouse provided in buffer to backbuffer
-//
-DUPL_RETURN OUTPUTMANAGER::DrawMouse(_In_ PTR_INFO* PtrInfo)
-{
-    // Vars to be used
-    ID3D11Texture2D* MouseTex = nullptr;
-    ID3D11ShaderResourceView* ShaderRes = nullptr;
-    ID3D11Buffer* VertexBufferMouse = nullptr;
-    D3D11_SUBRESOURCE_DATA InitData;
-    D3D11_TEXTURE2D_DESC Desc;
-    D3D11_SHADER_RESOURCE_VIEW_DESC SDesc;
-
-    // Position will be changed based on mouse position
-    VERTEX Vertices[NUMVERTICES] =
-    {
-        {XMFLOAT3(-1.0f, -1.0f, 0), XMFLOAT2(0.0f, 1.0f)},
-        {XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f)},
-        {XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f)},
-        {XMFLOAT3(1.0f, -1.0f, 0), XMFLOAT2(1.0f, 1.0f)},
-        {XMFLOAT3(-1.0f, 1.0f, 0), XMFLOAT2(0.0f, 0.0f)},
-        {XMFLOAT3(1.0f, 1.0f, 0), XMFLOAT2(1.0f, 0.0f)},
-    };
-
-    D3D11_TEXTURE2D_DESC FullDesc;
-    m_SharedSurf->GetDesc(&FullDesc);
-    INT DesktopWidth = FullDesc.Width;
-    INT DesktopHeight = FullDesc.Height;
-
-    // Center of desktop dimensions
-    INT CenterX = (DesktopWidth / 2);
-    INT CenterY = (DesktopHeight / 2);
-
-    // Clipping adjusted coordinates / dimensions
-    INT PtrWidth = 0;
-    INT PtrHeight = 0;
-    INT PtrLeft = 0;
-    INT PtrTop = 0;
-
-    // Buffer used if necessary (in case of monochrome or masked pointer)
-    BYTE* InitBuffer = nullptr;
-
-    // Used for copying pixels
-    D3D11_BOX Box;
-    Box.front = 0;
-    Box.back = 1;
-
-    Desc.MipLevels = 1;
-    Desc.ArraySize = 1;
-    Desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    Desc.SampleDesc.Count = 1;
-    Desc.SampleDesc.Quality = 0;
-    Desc.Usage = D3D11_USAGE_DEFAULT;
-    Desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    Desc.CPUAccessFlags = 0;
-    Desc.MiscFlags = 0;
-
-    // Set shader resource properties
-    SDesc.Format = Desc.Format;
-    SDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    SDesc.Texture2D.MostDetailedMip = Desc.MipLevels - 1;
-    SDesc.Texture2D.MipLevels = Desc.MipLevels;
-
-    switch (PtrInfo->ShapeInfo.Type)
-    {
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR:
-        {
-            PtrLeft = PtrInfo->Position.x;
-            PtrTop = PtrInfo->Position.y;
-
-            PtrWidth = static_cast<INT>(PtrInfo->ShapeInfo.Width);
-            PtrHeight = static_cast<INT>(PtrInfo->ShapeInfo.Height);
-
-            break;
-        }
-
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME:
-        {
-            ProcessMonoMask(true, PtrInfo, &PtrWidth, &PtrHeight, &PtrLeft, &PtrTop, &InitBuffer, &Box);
-            break;
-        }
-
-        case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR:
-        {
-            ProcessMonoMask(false, PtrInfo, &PtrWidth, &PtrHeight, &PtrLeft, &PtrTop, &InitBuffer, &Box);
-            break;
-        }
-
-        default:
-            break;
-    }
-
-    // VERTEX creation
-    Vertices[0].Pos.x = (PtrLeft - CenterX) / (FLOAT)CenterX;
-    Vertices[0].Pos.y = -1 * ((PtrTop + PtrHeight) - CenterY) / (FLOAT)CenterY;
-    Vertices[1].Pos.x = (PtrLeft - CenterX) / (FLOAT)CenterX;
-    Vertices[1].Pos.y = -1 * (PtrTop - CenterY) / (FLOAT)CenterY;
-    Vertices[2].Pos.x = ((PtrLeft + PtrWidth) - CenterX) / (FLOAT)CenterX;
-    Vertices[2].Pos.y = -1 * ((PtrTop + PtrHeight) - CenterY) / (FLOAT)CenterY;
-    Vertices[3].Pos.x = Vertices[2].Pos.x;
-    Vertices[3].Pos.y = Vertices[2].Pos.y;
-    Vertices[4].Pos.x = Vertices[1].Pos.x;
-    Vertices[4].Pos.y = Vertices[1].Pos.y;
-    Vertices[5].Pos.x = ((PtrLeft + PtrWidth) - CenterX) / (FLOAT)CenterX;
-    Vertices[5].Pos.y = -1 * (PtrTop - CenterY) / (FLOAT)CenterY;
-
-    // Set texture properties
-    Desc.Width = PtrWidth;
-    Desc.Height = PtrHeight;
-
-    // Set up init data
-    InitData.pSysMem = (PtrInfo->ShapeInfo.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR) ? PtrInfo->PtrShapeBuffer : InitBuffer;
-    InitData.SysMemPitch = (PtrInfo->ShapeInfo.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR) ? PtrInfo->ShapeInfo.Pitch : PtrWidth * BPP;
-    InitData.SysMemSlicePitch = 0;
-
-    // Create mouseshape as texture
-    HRESULT hr = m_Device->CreateTexture2D(&Desc, &InitData, &MouseTex);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to create mouse pointer texture", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Create shader resource from texture
-    hr = m_Device->CreateShaderResourceView(MouseTex, &SDesc, &ShaderRes);
-    if (FAILED(hr))
-    {
-        MouseTex->Release();
-        MouseTex = nullptr;
-        return ProcessFailure(m_Device, L"Failed to create shader resource from mouse pointer texture", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    D3D11_BUFFER_DESC BDesc;
-    ZeroMemory(&BDesc, sizeof(D3D11_BUFFER_DESC));
-    BDesc.Usage = D3D11_USAGE_DEFAULT;
-    BDesc.ByteWidth = sizeof(VERTEX) * NUMVERTICES;
-    BDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    BDesc.CPUAccessFlags = 0;
-
-    ZeroMemory(&InitData, sizeof(D3D11_SUBRESOURCE_DATA));
-    InitData.pSysMem = Vertices;
-
-    // Create vertex buffer
-    hr = m_Device->CreateBuffer(&BDesc, &InitData, &VertexBufferMouse);
-    if (FAILED(hr))
-    {
-        ShaderRes->Release();
-        ShaderRes = nullptr;
-        MouseTex->Release();
-        MouseTex = nullptr;
-        return ProcessFailure(m_Device, L"Failed to create mouse pointer vertex buffer in OutputManager", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Set resources
-    FLOAT BlendFactor[4] = {0.f, 0.f, 0.f, 0.f};
-    UINT Stride = sizeof(VERTEX);
-    UINT Offset = 0;
-    m_DeviceContext->IASetVertexBuffers(0, 1, &VertexBufferMouse, &Stride, &Offset);
-    m_DeviceContext->OMSetBlendState(m_BlendState, BlendFactor, 0xFFFFFFFF);
-    m_DeviceContext->OMSetRenderTargets(1, &m_RTV, nullptr);
-    m_DeviceContext->VSSetShader(m_VertexShader, nullptr, 0);
-    m_DeviceContext->PSSetShader(m_PixelShader, nullptr, 0);
-    m_DeviceContext->PSSetShaderResources(0, 1, &ShaderRes);
-    m_DeviceContext->PSSetSamplers(0, 1, &m_SamplerLinear);
-
-    // Draw
-    m_DeviceContext->Draw(NUMVERTICES, 0);
-
-    // Clean
-    if (VertexBufferMouse)
-    {
-        VertexBufferMouse->Release();
-        VertexBufferMouse = nullptr;
-    }
-    if (ShaderRes)
-    {
-        ShaderRes->Release();
-        ShaderRes = nullptr;
-    }
-    if (MouseTex)
-    {
-        MouseTex->Release();
-        MouseTex = nullptr;
-    }
-    if (InitBuffer)
-    {
-        delete [] InitBuffer;
-        InitBuffer = nullptr;
-    }
-
-    return DUPL_RETURN_SUCCESS;
-}
-
-//
 // Initialize shaders for drawing to screen
 //
 DUPL_RETURN OUTPUTMANAGER::InitShaders()
@@ -951,7 +989,7 @@ DUPL_RETURN OUTPUTMANAGER::InitShaders()
 //
 // Reset render target view
 //
-DUPL_RETURN OUTPUTMANAGER::MakeRTV()
+DUPL_RETURN OUTPUTMANAGER::CreateRenderTargetView()
 {
     // Get backbuffer
     ID3D11Texture2D* BackBuffer = nullptr;
@@ -962,7 +1000,7 @@ DUPL_RETURN OUTPUTMANAGER::MakeRTV()
     }
 
     // Create a render target view
-    hr = m_Device->CreateRenderTargetView(BackBuffer, nullptr, &m_RTV);
+    hr = m_Device->CreateRenderTargetView(BackBuffer, nullptr, &m_RenderTargetView);
     BackBuffer->Release();
     if (FAILED(hr))
     {
@@ -970,7 +1008,7 @@ DUPL_RETURN OUTPUTMANAGER::MakeRTV()
     }
 
     // Set new render target
-    m_DeviceContext->OMSetRenderTargets(1, &m_RTV, nullptr);
+    m_DeviceContext->OMSetRenderTargets(1, &m_RenderTargetView, nullptr);
 
     return DUPL_RETURN_SUCCESS;
 }
@@ -988,44 +1026,6 @@ void OUTPUTMANAGER::SetViewPort(UINT Width, UINT Height)
     VP.TopLeftX = 0;
     VP.TopLeftY = 0;
     m_DeviceContext->RSSetViewports(1, &VP);
-}
-
-//
-// Resize swapchain
-//
-DUPL_RETURN OUTPUTMANAGER::ResizeSwapChain()
-{
-    if (m_RTV)
-    {
-        m_RTV->Release();
-        m_RTV = nullptr;
-    }
-
-    RECT WindowRect;
-    GetClientRect(m_WindowHandle, &WindowRect);
-    UINT Width = WindowRect.right - WindowRect.left;
-    UINT Height = WindowRect.bottom - WindowRect.top;
-
-    // Resize swapchain
-    DXGI_SWAP_CHAIN_DESC SwapChainDesc;
-    m_SwapChain->GetDesc(&SwapChainDesc);
-    HRESULT hr = m_SwapChain->ResizeBuffers(SwapChainDesc.BufferCount, Width, Height, SwapChainDesc.BufferDesc.Format, SwapChainDesc.Flags);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to resize swapchain buffers in OUTPUTMANAGER", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Make new render target view
-    DUPL_RETURN Ret = MakeRTV();
-    if (Ret != DUPL_RETURN_SUCCESS)
-    {
-        return Ret;
-    }
-
-    // Set new viewport
-    SetViewPort(Width, Height);
-
-    return Ret;
 }
 
 //
@@ -1051,10 +1051,10 @@ void OUTPUTMANAGER::CleanRefs()
         m_InputLayout = nullptr;
     }
 
-    if (m_RTV)
+    if (m_RenderTargetView)
     {
-        m_RTV->Release();
-        m_RTV = nullptr;
+        m_RenderTargetView->Release();
+        m_RenderTargetView = nullptr;
     }
 
     if (m_SamplerLinear)

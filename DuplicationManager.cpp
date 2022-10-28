@@ -199,7 +199,9 @@ DUPL_RETURN DUPLICATIONMANAGER::GetMouse(_Inout_ PTR_INFO* PtrInfo, _In_ DXGI_OU
 // Get next frame and write it into Data
 //
 _Success_(*Timeout == false && return == DUPL_RETURN_SUCCESS)
-DUPL_RETURN DUPLICATIONMANAGER::GetFrame(_Out_ FRAME_DATA* Data, _Out_ bool* Timeout)
+DUPL_RETURN DUPLICATIONMANAGER::GetFrame(
+    _Out_ FRAME_DATA* Data,
+    _Out_ bool* Timeout)
 {
     IDXGIResource* DesktopResource = nullptr;
     DXGI_OUTDUPL_FRAME_INFO FrameInfo;

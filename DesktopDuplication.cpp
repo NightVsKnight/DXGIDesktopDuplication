@@ -446,10 +446,10 @@ DWORD WINAPI DDProc(_In_ void* Param)
 
     // D3D objects
     ID3D11Texture2D* SharedSurf = nullptr;
-    IDXGIKeyedMutex* KeyMutex = nullptr;
+    IDXGIKeyedMutex* KeyedMutex = nullptr;
 
     // Data passed in from thread creation
-    THREAD_DATA* TData = reinterpret_cast<THREAD_DATA*>(Param);
+    THREAD_DATA* ThreadData = reinterpret_cast<THREAD_DATA*>(Param);
 
     // Get desktop
     DUPL_RETURN Ret;
@@ -458,7 +458,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
     if (!CurrentDesktop)
     {
         // We do not have access to the desktop so request a retry
-        SetEvent(TData->ExpectedErrorEvent);
+        SetEvent(ThreadData->ExpectedErrorEvent);
         Ret = DUPL_RETURN_ERROR_EXPECTED;
         goto Exit;
     }
@@ -475,19 +475,23 @@ DWORD WINAPI DDProc(_In_ void* Param)
     }
 
     // New display manager
-    DispMgr.InitD3D(&TData->DxRes);
+    DispMgr.InitD3D(&ThreadData->DxRes);
 
-    DispMgr.NdiInit(); // TODO: handle error
-
-    // Obtain handle to sync shared Surface
-    HRESULT hr = TData->DxRes.Device->OpenSharedResource(TData->TexSharedHandle, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&SharedSurf));
-    if (FAILED (hr))
+    if (!DispMgr.NdiInit())
     {
-        Ret = ProcessFailure(TData->DxRes.Device, L"Opening shared texture failed", L"Error", hr, SystemTransitionsExpectedErrors);
+        Ret = DUPL_RETURN_ERROR_UNEXPECTED;
         goto Exit;
     }
 
-    hr = SharedSurf->QueryInterface(__uuidof(IDXGIKeyedMutex), reinterpret_cast<void**>(&KeyMutex));
+    // Obtain handle to sync shared Surface
+    HRESULT hr = ThreadData->DxRes.Device->OpenSharedResource(ThreadData->TexSharedHandle, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&SharedSurf));
+    if (FAILED (hr))
+    {
+        Ret = ProcessFailure(ThreadData->DxRes.Device, L"Opening shared texture failed", L"Error", hr, SystemTransitionsExpectedErrors);
+        goto Exit;
+    }
+
+    hr = SharedSurf->QueryInterface(__uuidof(IDXGIKeyedMutex), reinterpret_cast<void**>(&KeyedMutex));
     if (FAILED(hr))
     {
         Ret = ProcessFailure(nullptr, L"Failed to get keyed mutex interface in spawned thread", L"Error", hr);
@@ -495,7 +499,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
     }
 
     // Make duplication manager
-    Ret = DuplMgr.InitDupl(TData->DxRes.Device, TData->Output);
+    Ret = DuplMgr.InitDupl(ThreadData->DxRes.Device, ThreadData->Output);
     if (Ret != DUPL_RETURN_SUCCESS)
     {
         goto Exit;
@@ -510,7 +514,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
     bool WaitToProcessCurrentFrame = false;
     FRAME_DATA CurrentData;
 
-    while ((WaitForSingleObjectEx(TData->TerminateThreadsEvent, 0, FALSE) == WAIT_TIMEOUT))
+    while ((WaitForSingleObjectEx(ThreadData->TerminateThreadsEvent, 0, FALSE) == WAIT_TIMEOUT))
     {
         if (!WaitToProcessCurrentFrame)
         {
@@ -534,7 +538,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
 
         // We have a new frame so try and process it
         // Try to acquire keyed mutex in order to access shared surface
-        hr = KeyMutex->AcquireSync(0, 1000);
+        hr = KeyedMutex->AcquireSync(0, 1000);
         if (hr == static_cast<HRESULT>(WAIT_TIMEOUT))
         {
             // Can't use shared surface right now, try again later
@@ -544,7 +548,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
         else if (FAILED(hr))
         {
             // Generic unknown failure
-            Ret = ProcessFailure(TData->DxRes.Device, L"Unexpected error acquiring KeyMutex", L"Error", hr, SystemTransitionsExpectedErrors);
+            Ret = ProcessFailure(ThreadData->DxRes.Device, L"Unexpected error acquiring KeyMutex", L"Error", hr, SystemTransitionsExpectedErrors);
             DuplMgr.DoneWithFrame();
             break;
         }
@@ -553,28 +557,28 @@ DWORD WINAPI DDProc(_In_ void* Param)
         WaitToProcessCurrentFrame = false;
 
         // Get mouse info
-        Ret = DuplMgr.GetMouse(TData->PtrInfo, &(CurrentData.FrameInfo), TData->OffsetX, TData->OffsetY);
+        Ret = DuplMgr.GetMouse(ThreadData->PtrInfo, &(CurrentData.FrameInfo), ThreadData->OffsetX, ThreadData->OffsetY);
         if (Ret != DUPL_RETURN_SUCCESS)
         {
             DuplMgr.DoneWithFrame();
-            KeyMutex->ReleaseSync(1);
+            KeyedMutex->ReleaseSync(1);
             break;
         }
 
         // Process new frame
-        Ret = DispMgr.ProcessFrame(&CurrentData, SharedSurf, TData->OffsetX, TData->OffsetY, &DesktopDesc);
+        Ret = DispMgr.ProcessFrame(&CurrentData, SharedSurf, ThreadData->OffsetX, ThreadData->OffsetY, &DesktopDesc);
         if (Ret != DUPL_RETURN_SUCCESS)
         {
             DuplMgr.DoneWithFrame();
-            KeyMutex->ReleaseSync(1);
+            KeyedMutex->ReleaseSync(1);
             break;
         }
 
         // Release acquired keyed mutex
-        hr = KeyMutex->ReleaseSync(1);
+        hr = KeyedMutex->ReleaseSync(1);
         if (FAILED(hr))
         {
-            Ret = ProcessFailure(TData->DxRes.Device, L"Unexpected error releasing the keyed mutex", L"Error", hr, SystemTransitionsExpectedErrors);
+            Ret = ProcessFailure(ThreadData->DxRes.Device, L"Unexpected error releasing the keyed mutex", L"Error", hr, SystemTransitionsExpectedErrors);
             DuplMgr.DoneWithFrame();
             break;
         }
@@ -593,12 +597,12 @@ Exit:
         if (Ret == DUPL_RETURN_ERROR_EXPECTED)
         {
             // The system is in a transition state so request the duplication be restarted
-            SetEvent(TData->ExpectedErrorEvent);
+            SetEvent(ThreadData->ExpectedErrorEvent);
         }
         else
         {
             // Unexpected error so exit the application
-            SetEvent(TData->UnexpectedErrorEvent);
+            SetEvent(ThreadData->UnexpectedErrorEvent);
         }
     }
 
@@ -608,10 +612,10 @@ Exit:
         SharedSurf = nullptr;
     }
 
-    if (KeyMutex)
+    if (KeyedMutex)
     {
-        KeyMutex->Release();
-        KeyMutex = nullptr;
+        KeyedMutex->Release();
+        KeyedMutex = nullptr;
     }
 
     return 0;

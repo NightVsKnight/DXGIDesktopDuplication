@@ -36,6 +36,19 @@ class OUTPUTMANAGER
 
     private:
         // Methods
+        DUPL_RETURN CreateRenderTargetView();
+        void SetViewPort(
+            UINT Width,
+            UINT Height);
+        DUPL_RETURN InitShaders();
+        DUPL_RETURN CreateSharedSurf(
+            INT SingleOutput,
+            _Out_ UINT* OutCount,
+            _Out_ RECT* DeskBounds);
+        DUPL_RETURN ResizeSwapChain();
+        DUPL_RETURN DrawFrame();
+        DUPL_RETURN DrawMouse(
+            _In_ PTR_INFO* PtrInfo);
         DUPL_RETURN ProcessMonoMask(
             bool IsMono,
             _Inout_ PTR_INFO* PtrInfo,
@@ -45,27 +58,13 @@ class OUTPUTMANAGER
             _Out_ INT* PtrTop,
             _Outptr_result_bytebuffer_(*PtrHeight** PtrWidth* BPP) BYTE** InitBuffer,
             _Out_ D3D11_BOX* Box);
-        DUPL_RETURN MakeRTV();
-        void SetViewPort(
-            UINT Width,
-            UINT Height);
-        DUPL_RETURN InitShaders();
-        DUPL_RETURN InitGeometry();
-        DUPL_RETURN CreateSharedSurf(
-            INT SingleOutput,
-            _Out_ UINT* OutCount,
-            _Out_ RECT* DeskBounds);
-        DUPL_RETURN DrawFrame();
-        DUPL_RETURN DrawMouse(
-            _In_ PTR_INFO* PtrInfo);
-        DUPL_RETURN ResizeSwapChain();
 
         // Vars
         IDXGISwapChain1* m_SwapChain;
         ID3D11Device* m_Device;
         IDXGIFactory2* m_Factory;
         ID3D11DeviceContext* m_DeviceContext;
-        ID3D11RenderTargetView* m_RTV;
+        ID3D11RenderTargetView* m_RenderTargetView;
         ID3D11SamplerState* m_SamplerLinear;
         ID3D11BlendState* m_BlendState;
         ID3D11VertexShader* m_VertexShader;
